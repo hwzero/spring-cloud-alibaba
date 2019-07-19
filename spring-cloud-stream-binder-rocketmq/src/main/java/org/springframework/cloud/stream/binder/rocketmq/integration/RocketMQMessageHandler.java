@@ -27,6 +27,7 @@ import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.apache.rocketmq.spring.support.RocketMQHeaders;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cloud.stream.binder.BinderHeaders;
 import org.springframework.cloud.stream.binder.rocketmq.RocketMQBinderConstants;
 import org.springframework.cloud.stream.binder.rocketmq.metrics.Instrumentation;
 import org.springframework.cloud.stream.binder.rocketmq.metrics.InstrumentationManager;
@@ -145,36 +146,82 @@ public class RocketMQMessageHandler extends AbstractMessageHandler implements Li
 				catch (Exception e) {
 					// ignore
 				}
+				
+				Object hashKey =  message.getHeaders().get(BinderHeaders.PARTITION_HEADER);
+				if (hashKey == null ) { 
+					hashKey = message.getHeaders().get(BinderHeaders.PARTITION_OVERRIDE);
+				}
+				
 				if (sync) {
-					sendRes = rocketMQTemplate.syncSend(topicWithTags.toString(), message,
-							rocketMQTemplate.getProducer().getSendMsgTimeout(),
-							delayLevel);
-					log.debug("sync send to topic " + topicWithTags + " " + sendRes);
+					
+					if (hashKey != null ) {
+						
+						sendRes = rocketMQTemplate.syncSendOrderly(topicWithTags.toString(), message,
+								hashKey.toString(),
+								rocketMQTemplate.getProducer().getSendMsgTimeout());
+						
+						log.debug("sync send orderly to topic " + topicWithTags + " " + sendRes);
+						
+					}else {
+					
+						sendRes = rocketMQTemplate.syncSend(topicWithTags.toString(), message,
+								rocketMQTemplate.getProducer().getSendMsgTimeout(),
+								delayLevel);
+						log.debug("sync send to topic " + topicWithTags + " " + sendRes);
+					}
 				}
 				else {
-					rocketMQTemplate.asyncSend(topicWithTags.toString(), message,
-							new SendCallback() {
-								@Override
-								public void onSuccess(SendResult sendResult) {
-									log.debug("async send to topic " + topicWithTags + " "
-											+ sendResult);
-								}
-
-								@Override
-								public void onException(Throwable e) {
-									log.error(
-											"RocketMQ Message hasn't been sent. Caused by "
-													+ e.getMessage());
-									if (getSendFailureChannel() != null) {
-										getSendFailureChannel().send(
-												RocketMQMessageHandler.this.errorMessageStrategy
-														.buildErrorMessage(
-																new MessagingException(
-																		message, e),
-																null));
+					
+					if (hashKey != null ) {
+						rocketMQTemplate.asyncSendOrderly(topicWithTags.toString(), message, hashKey.toString(),
+								new SendCallback() {
+									@Override
+									public void onSuccess(SendResult sendResult) {
+										log.debug("async send to topic " + topicWithTags + " "
+												+ sendResult);
 									}
-								}
-							});
+	
+									@Override
+									public void onException(Throwable e) {
+										log.error(
+												"RocketMQ Message hasn't been sent. Caused by "
+														+ e.getMessage());
+										if (getSendFailureChannel() != null) {
+											getSendFailureChannel().send(
+													RocketMQMessageHandler.this.errorMessageStrategy
+															.buildErrorMessage(
+																	new MessagingException(
+																			message, e),
+																	null));
+										}
+									}
+								});
+					}else {
+					
+						rocketMQTemplate.asyncSend(topicWithTags.toString(), message,
+								new SendCallback() {
+									@Override
+									public void onSuccess(SendResult sendResult) {
+										log.debug("async send to topic " + topicWithTags + " "
+												+ sendResult);
+									}
+	
+									@Override
+									public void onException(Throwable e) {
+										log.error(
+												"RocketMQ Message hasn't been sent. Caused by "
+														+ e.getMessage());
+										if (getSendFailureChannel() != null) {
+											getSendFailureChannel().send(
+													RocketMQMessageHandler.this.errorMessageStrategy
+															.buildErrorMessage(
+																	new MessagingException(
+																			message, e),
+																	null));
+										}
+									}
+								});
+					}
 				}
 			}
 			if (sendRes != null && !sendRes.getSendStatus().equals(SendStatus.SEND_OK)) {
